@@ -1,0 +1,47 @@
+# Internal developer documentation (NEVER commit)
+agent-docs/
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Runtime data, cloned repos, vector stores, databases
+data/
+workspaces/
+cloned_repos/
+qdrant_storage/
+qdrant_db/
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
