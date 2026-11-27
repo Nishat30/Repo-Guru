@@ -35,16 +35,56 @@ const INGEST_STEPS = [
   { key: "indexing", label: "Indexing" },
 ];
 
-const SESSION_STORAGE_KEY = "repoguru-session-v1";
+const WORKSPACES_STORAGE_KEY = "repoguru-workspaces-v1";
+const ACTIVE_REPO_KEY = "repoguru-active-repo-v1";
 const SESSION_TTL_MS = 9 * 60 * 60 * 1000; // 9 hours
 
 interface SavedSession {
   repoId: string;
+  owner: string;
+  name: string;
   expiresAt: number;
   openTabPaths: string[];
   activeFilePath: string | null;
   messages: ChatMessageItem[];
   languageMode: LanguageMode;
+}
+
+function loadSavedWorkspaces(): SavedSession[] {
+  try {
+    const raw = localStorage.getItem(WORKSPACES_STORAGE_KEY);
+    if (!raw) return [];
+    const list: SavedSession[] = JSON.parse(raw);
+    const now = Date.now();
+    const valid = list.filter((w) => w.repoId && w.expiresAt && w.expiresAt > now);
+    if (valid.length !== list.length) {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(valid));
+    }
+    return valid;
+  } catch {
+    return [];
+  }
+}
+
+function getRepoMonogram(name: string): string {
+  const clean = name.replace(/[^A-Za-z0-9]/g, "");
+  return (clean.slice(0, 2) || "RG").toUpperCase();
+}
+
+const RAIL_COLORS = [
+  "bg-[#7F1D1D] text-[#FAF9F5]",
+  "bg-[#3B1D52] text-[#FAF9F5]",
+  "bg-[#1E40AF] text-[#FAF9F5]",
+  "bg-[#14532D] text-[#FAF9F5]",
+  "bg-[#92400E] text-[#FAF9F5]",
+];
+
+function getRailColor(repoId: string): string {
+  let hash = 0;
+  for (let i = 0; i < repoId.length; i++) {
+    hash = (hash * 31 + repoId.charCodeAt(i)) >>> 0;
+  }
+  return RAIL_COLORS[hash % RAIL_COLORS.length];
 }
 
 const EXAMPLE_REPOS = [
@@ -105,6 +145,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [activeStage, setActiveStage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [recentWorkspaces, setRecentWorkspaces] = useState<SavedSession[]>(() => loadSavedWorkspaces());
   const sessionExpiresAtRef = useRef<number | null>(null);
   const restoredRef = useRef(false);
 
@@ -149,35 +190,25 @@ export default function App() {
     }
   }, []);
 
-  // Restore active workspace from localStorage if within 9-hour TTL
-  useEffect(() => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return;
-
-    try {
-      const saved: SavedSession = JSON.parse(raw);
-      if (!saved.repoId || !saved.expiresAt || Date.now() >= saved.expiresAt) {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        return;
-      }
-
-      sessionExpiresAtRef.current = saved.expiresAt;
-      (async () => {
+  const switchToWorkspace = useCallback(
+    async (saved: SavedSession) => {
+      try {
         const res = await fetch(`/api/repos/${saved.repoId}/status`);
-        if (!res.ok) {
-          localStorage.removeItem(SESSION_STORAGE_KEY);
-          return;
-        }
+        if (!res.ok) return;
         const statusData: RepoStatus = await res.json();
         if (statusData.status !== "ready") return;
 
+        sessionExpiresAtRef.current = saved.expiresAt;
+        localStorage.setItem(ACTIVE_REPO_KEY, saved.repoId);
         setRepoStatus(statusData);
-        if (saved.languageMode) setLanguageMode(saved.languageMode);
-        if (Array.isArray(saved.messages)) {
-          setMessages(saved.messages.map((m) => ({ ...m, isStreaming: false })));
-        }
+        setHighlightedCitation(null);
+        setSearchResults([]);
+        setLanguageMode(saved.languageMode || "english");
+        setMessages(
+          Array.isArray(saved.messages)
+            ? saved.messages.map((m) => ({ ...m, isStreaming: false }))
+            : []
+        );
         loadWorkspaceData(statusData.repo_id);
 
         if (Array.isArray(saved.openTabPaths) && saved.openTabPaths.length > 0) {
@@ -202,30 +233,58 @@ export default function App() {
             setActiveFilePath(saved.activeFilePath);
           } else if (validTabs.length > 0) {
             setActiveFilePath(validTabs[0].path);
+          } else {
+            setActiveFilePath(null);
           }
+        } else {
+          setOpenTabs([]);
+          setActiveFilePath(null);
         }
-      })();
-    } catch {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-    }
-  }, [loadWorkspaceData]);
+      } catch (err) {
+        console.error("Failed to restore workspace:", err);
+      }
+    },
+    [loadWorkspaceData]
+  );
 
-  // Persist workspace state to localStorage for 9 hours
+  // Restore last active workspace from localStorage if within 9-hour TTL
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const savedList = loadSavedWorkspaces();
+    setRecentWorkspaces(savedList);
+    if (savedList.length === 0) return;
+
+    const activeId = localStorage.getItem(ACTIVE_REPO_KEY);
+    const target = savedList.find((w) => w.repoId === activeId) || savedList[0];
+    if (target) {
+      switchToWorkspace(target);
+    }
+  }, [switchToWorkspace]);
+
+  // Persist current workspace into recentWorkspaces (9-hour TTL)
   useEffect(() => {
     if (!repoStatus || repoStatus.status !== "ready") return;
     if (!sessionExpiresAtRef.current || Date.now() >= sessionExpiresAtRef.current) {
       sessionExpiresAtRef.current = Date.now() + SESSION_TTL_MS;
     }
-    const payload: SavedSession = {
+    const updatedEntry: SavedSession = {
       repoId: repoStatus.repo_id,
+      owner: repoStatus.owner,
+      name: repoStatus.name,
       expiresAt: sessionExpiresAtRef.current,
       openTabPaths: openTabs.map((t) => t.path),
       activeFilePath,
       messages: messages.filter((m) => !m.isStreaming),
       languageMode,
     };
+
+    const existing = loadSavedWorkspaces().filter((w) => w.repoId !== repoStatus.repo_id);
+    const nextList = [updatedEntry, ...existing].slice(0, 8);
+    setRecentWorkspaces(nextList);
+    localStorage.setItem(ACTIVE_REPO_KEY, repoStatus.repo_id);
     try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(nextList));
     } catch {
       // Ignore quota errors
     }
@@ -449,10 +508,11 @@ export default function App() {
     }
   };
 
-  const resetWorkspace = () => {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+  const openNewRepoScreen = () => {
+    localStorage.removeItem(ACTIVE_REPO_KEY);
     sessionExpiresAtRef.current = null;
     setRepoStatus(null);
+    setRepoUrl("");
     setTree([]);
     setOpenTabs([]);
     setActiveFilePath(null);
@@ -515,18 +575,35 @@ export default function App() {
               </div>
 
               {!repoStatus && (
-                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-muted">
-                  <span>Try:</span>
-                  {EXAMPLE_REPOS.map((ex) => (
-                    <button
-                      key={ex}
-                      type="button"
-                      onClick={() => setRepoUrl(ex)}
-                      className="px-2.5 py-1 rounded-lg bg-surface-alt border border-border hover:border-accent text-text transition-colors"
-                    >
-                      {ex.replace("https://github.com/", "")}
-                    </button>
-                  ))}
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                    <span>Try:</span>
+                    {EXAMPLE_REPOS.map((ex) => (
+                      <button
+                        key={ex}
+                        type="button"
+                        onClick={() => setRepoUrl(ex)}
+                        className="px-2.5 py-1 rounded-lg bg-surface-alt border border-border hover:border-accent text-text transition-colors"
+                      >
+                        {ex.replace("https://github.com/", "")}
+                      </button>
+                    ))}
+                  </div>
+                  {recentWorkspaces.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                      <span>Recent:</span>
+                      {recentWorkspaces.map((w) => (
+                        <button
+                          key={w.repoId}
+                          type="button"
+                          onClick={() => switchToWorkspace(w)}
+                          className="px-2.5 py-1 rounded-lg bg-accent-soft border border-accent/30 text-accent hover:bg-accent hover:text-white transition-colors font-medium"
+                        >
+                          {w.owner}/{w.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </form>
@@ -640,7 +717,7 @@ export default function App() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={resetWorkspace}
+            onClick={openNewRepoScreen}
             className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs border border-border bg-surface-alt hover:border-accent transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -659,10 +736,10 @@ export default function App() {
 
       {/* Main Three-Pane Body */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Thin Activity Bar */}
+        {/* Thin Activity Bar + Slack-style Repo Switcher Rail */}
         <aside
           aria-label="Workspace activity bar"
-          className="w-12 border-r border-border bg-surface-alt/50 flex flex-col items-center py-2.5 gap-2 shrink-0"
+          className="w-14 border-r border-border bg-surface-alt/50 flex flex-col items-center py-2.5 gap-2 shrink-0"
         >
           <button
             type="button"
@@ -705,6 +782,45 @@ export default function App() {
           >
             <Network className="w-4 h-4" />
           </button>
+
+          <div className="w-7 h-px bg-border my-1" />
+
+          {/* Slack-style Recent Repositories Rail */}
+          <div className="flex-1 flex flex-col items-center gap-2.5 overflow-y-auto py-1 w-full">
+            {recentWorkspaces.map((w) => {
+              const isActive = w.repoId === repoStatus.repo_id;
+              return (
+                <button
+                  key={w.repoId}
+                  type="button"
+                  onClick={() => {
+                    if (!isActive) switchToWorkspace(w);
+                  }}
+                  title={`${w.owner}/${w.name}`}
+                  aria-label={`Switch to ${w.owner}/${w.name}`}
+                  className={`w-9 h-9 rounded-xl font-serif text-xs font-semibold flex items-center justify-center transition-all duration-150 shrink-0 ${getRailColor(
+                    w.repoId
+                  )} ${
+                    isActive
+                      ? "ring-2 ring-accent ring-offset-2 ring-offset-bg scale-105"
+                      : "opacity-75 hover:opacity-100 hover:scale-105"
+                  }`}
+                >
+                  {getRepoMonogram(w.name)}
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={openNewRepoScreen}
+              title="Add new repository"
+              aria-label="Add new repository"
+              className="w-9 h-9 rounded-xl border border-dashed border-border text-text-muted hover:text-accent hover:border-accent flex items-center justify-center transition-colors shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
         </aside>
 
         {/* Left Sidebar (Explorer / Search) */}
