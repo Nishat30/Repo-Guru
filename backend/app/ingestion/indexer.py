@@ -37,7 +37,10 @@ def get_qdrant_client() -> QdrantClient:
     """Return a singleton QdrantClient (remote URL or local persistent path)."""
     settings = get_settings()
     if settings.qdrant_url:
-        client = QdrantClient(url=settings.qdrant_url)
+        client = QdrantClient(
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key or None,
+        )
     else:
         settings.ensure_dirs()
         client = QdrantClient(path=str(settings.qdrant_dir))
