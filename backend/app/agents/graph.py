@@ -170,11 +170,11 @@ async def mcp_explorer_node(state: AgentState) -> dict[str, Any]:
             {"role": "user", "content": f"Repository ID: {repo_id}\nQuestion: {question}"},
         ]
 
-        # Up to 2 fast tool-calling turns
+        # Up to 2 fast tool-calling turns (use "auto" so tool-capable models are selected)
         for _ in range(2):
             resp = await ask_response(
                 messages=messages,
-                model="chat:fast",
+                model="auto",
                 tools=openai_tools,
                 temperature=0.1,
                 max_tokens=700,
@@ -292,17 +292,19 @@ def build_mentor_messages(state: AgentState) -> list[dict[str, str]]:
     )
 
     rag_blocks: list[str] = []
-    for item in state.get("rag_results", [])[:8]:
+    for item in state.get("rag_results", [])[:5]:
+        snippet = str(item.get("content", ""))[:1200]
         rag_blocks.append(
             f"### [[citation:{item['file_path']}:{item['start_line']}-{item['end_line']}]] "
-            f"({item.get('symbol_name', '')})\n```{item.get('language', '')}\n{item['content']}\n```"
+            f"({item.get('symbol_name', '')})\n```{item.get('language', '')}\n{snippet}\n```"
         )
 
+    mcp_text = (state.get("mcp_findings") or "")[:2500]
     evidence = (
         "## Verified Hybrid RAG Code Chunks\n"
         + ("\n\n".join(rag_blocks) if rag_blocks else "(No RAG chunks retrieved)")
         + "\n\n## Verified MCP Explorer Findings\n"
-        + (state.get("mcp_findings") or "(No additional MCP findings)")
+        + (mcp_text or "(No additional MCP findings)")
     )
 
     history_text = ""
