@@ -370,9 +370,11 @@ export default function App() {
       <div className="min-h-screen flex flex-col bg-bg text-text">
         <header className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center font-serif font-semibold text-lg">
-              R
-            </div>
+            <img
+              src="/favicon.svg"
+              alt="RepoGuru Wizard"
+              className="w-8 h-8 rounded-lg border border-border shadow-sm"
+            />
             <span className="font-serif text-xl font-semibold tracking-tight">RepoGuru</span>
           </div>
           <button
@@ -496,9 +498,11 @@ export default function App() {
       <header className="h-11 px-3 border-b border-border bg-surface flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-accent text-white flex items-center justify-center font-serif font-semibold text-sm">
-              R
-            </div>
+            <img
+              src="/favicon.svg"
+              alt="RepoGuru Wizard"
+              className="w-6 h-6 rounded-md border border-border"
+            />
             <span className="font-serif text-base font-semibold">RepoGuru</span>
           </div>
           <span className="text-border">/</span>

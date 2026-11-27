@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        serif: ['"Newsreader"', "Georgia", "serif"],
+        serif: ['"Cinzel"', '"Newsreader"', "Georgia", "serif"],
         sans: ['"Inter"', "system-ui", "-apple-system", "sans-serif"],
         mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
       },
