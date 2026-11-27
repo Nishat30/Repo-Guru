@@ -233,3 +233,4 @@ export const LandingSections: React.FC = () => {
     </>
   );
 };
+

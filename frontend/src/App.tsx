@@ -18,7 +18,7 @@ import { ArchitectureModal } from "./components/ArchitectureModal";
 import { ChatPanel } from "./components/ChatPanel";
 import { CodeViewer } from "./components/CodeViewer";
 import { FileTree } from "./components/FileTree";
-import { LandingSections } from "./components/LandingSections";
+import { LandingPage } from "./components/LandingPage";
 import {
   ArchitectureData,
   ChatMessageItem,
@@ -566,164 +566,24 @@ export default function App() {
     setIngestError(null);
   };
 
-  // Landing / Ingestion Screen
+  // Landing / Ingestion Screen (always light parchment; workspace keeps its own theme)
   if (!repoStatus || repoStatus.status !== "ready") {
     return (
-      <div className="min-h-screen flex flex-col bg-bg text-text">
-        <header className="flex items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <img
-              src="/favicon.svg"
-              alt="RepoGuru Wizard"
-              className="w-8 h-8 rounded-lg border border-border shadow-sm"
-            />
-            <span className="font-serif text-xl font-semibold tracking-tight">RepoGuru</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-            aria-label="Toggle color theme"
-            className="p-2 rounded-xl border border-border bg-surface hover:bg-surface-alt transition-colors"
-          >
-            {theme === "light" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </button>
-        </header>
-
-        <main className="flex-1 flex flex-col items-center px-4 pt-8">
-          <div className="w-full max-w-xl bg-surface border border-border rounded-2xl p-7 shadow-[var(--shadow-soft)]">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent border border-accent/25 mb-3">
-              Use it for your GSoC repos
-            </div>
-            <h1 className="font-serif text-3xl text-text mb-2">
-              Understand any codebase in minutes
-            </h1>
-            <p className="text-sm text-text-muted mb-6">
-              Paste a public GitHub repository URL. RepoGuru parses ASTs, maps dependencies, and pairs you with a bilingual Senior Mentor.
-            </p>
-
-            <form onSubmit={handleIngestSubmit} className="space-y-3">
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="url"
-                  required
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  placeholder="Paste a GitHub repository to begin (https://github.com/owner/repo)"
-                  aria-label="GitHub repository URL"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-bg border border-border text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
-                />
-                <button
-                  type="submit"
-                  disabled={isSubmittingUrl || (!!repoStatus && repoStatus.status !== "failed")}
-                  className="px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors shrink-0"
-                >
-                  {isSubmittingUrl ? "Starting..." : "Analyze Repo"}
-                </button>
-              </div>
-
-              {!repoStatus && (
-                <div className="space-y-2.5 pt-1">
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                    <span>Try:</span>
-                    {EXAMPLE_REPOS.map((ex) => (
-                      <button
-                        key={ex}
-                        type="button"
-                        onClick={() => setRepoUrl(ex)}
-                        className="px-2.5 py-1 rounded-lg bg-surface-alt border border-border hover:border-accent text-text transition-colors"
-                      >
-                        {ex.replace("https://github.com/", "")}
-                      </button>
-                    ))}
-                  </div>
-                  {recentWorkspaces.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                      <span>Recent ({recentWorkspaces.length}/{MAX_WORKSPACES}):</span>
-                      {recentWorkspaces.map((w) => (
-                        <div
-                          key={w.repoId}
-                          className="group inline-flex items-center rounded-lg bg-accent-soft border border-accent/30 overflow-hidden"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => switchToWorkspace(w)}
-                            className="px-2.5 py-1 text-accent hover:bg-accent hover:text-white transition-colors font-medium"
-                          >
-                            {w.owner}/{w.name}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteWorkspace(w.repoId)}
-                            title={`Remove ${w.owner}/${w.name}`}
-                            aria-label={`Remove ${w.owner}/${w.name}`}
-                            className="px-1.5 py-1 text-accent/70 hover:text-white hover:bg-red-600 transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </form>
-
-            {(ingestError || repoStatus?.status === "failed") && (
-              <div className="mt-5 flex items-start gap-2.5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-sm text-red-700 dark:text-red-300">
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                <div>
-                  <div className="font-medium">Ingestion failed</div>
-                  <div className="text-xs opacity-90 mt-0.5">
-                    {ingestError || repoStatus?.error_message}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {repoStatus && repoStatus.status !== "failed" && (
-              <div className="mt-6 pt-5 border-t border-border space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-text">
-                    {repoStatus.owner}/{repoStatus.name}
-                  </span>
-                  <span className="text-text-muted">{repoStatus.progress}%</span>
-                </div>
-
-                {/* Progress Stepper */}
-                <div className="grid grid-cols-4 gap-2">
-                  {INGEST_STEPS.map((step) => {
-                    const st = getStepState(repoStatus.status, step.key);
-                    return (
-                      <div
-                        key={step.key}
-                        className={`flex flex-col items-center gap-1.5 p-2.5 rounded-xl border text-xs transition-colors ${
-                          st === "done"
-                            ? "bg-accent-soft border-accent/30 text-text"
-                            : st === "active"
-                              ? "bg-surface-alt border-accent text-accent font-medium"
-                              : "bg-bg border-border text-text-muted"
-                        }`}
-                      >
-                        {st === "done" ? (
-                          <CheckCircle2 className="w-4 h-4 text-accent" />
-                        ) : st === "active" ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-accent" />
-                        ) : (
-                          <span className="w-4 h-4 rounded-full border border-border" />
-                        )}
-                        <span>{step.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <p className="text-xs text-text-muted text-center">{repoStatus.step_message}</p>
-              </div>
-            )}
-          </div>
-          <LandingSections />
-        </main>
-      </div>
+      <LandingPage
+        repoUrl={repoUrl}
+        onChangeRepoUrl={setRepoUrl}
+        onSubmitRepo={handleIngestSubmit}
+        isSubmittingUrl={isSubmittingUrl}
+        repoStatus={repoStatus}
+        ingestError={ingestError}
+        recentWorkspaces={recentWorkspaces}
+        maxWorkspaces={MAX_WORKSPACES}
+        onSelectRecent={(repoId) => {
+          const found = recentWorkspaces.find((w) => w.repoId === repoId);
+          if (found) switchToWorkspace(found);
+        }}
+        onDeleteRecent={deleteWorkspace}
+      />
     );
   }
 
@@ -736,10 +596,10 @@ export default function App() {
           <div className="flex items-center gap-2">
             <img
               src="/favicon.svg"
-              alt="RepoGuru Wizard"
+              alt="RepoGuru"
               className="w-6 h-6 rounded-md border border-border"
             />
-            <span className="font-serif text-base font-semibold">RepoGuru</span>
+            <span className="font-serif text-lg font-semibold">RepoGuru</span>
           </div>
           <span className="text-border">/</span>
           <div className="flex items-center gap-1.5 text-xs font-medium text-text truncate">
@@ -1043,6 +903,7 @@ export default function App() {
                 languageMode={languageMode}
                 activeStage={activeStage}
                 isStreaming={isStreaming}
+                languages={archData?.languages}
                 onToggleLanguage={setLanguageMode}
                 onSendMessage={handleSendMessage}
                 onClickCitation={(cite) => openFile(cite.file, cite)}
