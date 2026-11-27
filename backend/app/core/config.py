@@ -4,7 +4,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Ensure .env values are also exported to os.environ for freelm.AsyncFreeLLM.from_env()
+load_dotenv()
 
 
 class Settings(BaseSettings):

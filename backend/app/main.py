@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.agents.graph import repoguru_graph
 from app.core.config import get_settings
 from app.core.database import Repository, get_db, init_db
-from app.core.llm import has_llm_credentials
+from app.core.llm import FRIENDLY_NO_PROVIDERS_MSG, has_llm_credentials, health as llm_health
 from app.ingestion.cloner import build_file_tree, detect_language, is_binary_file, parse_github_url
 from app.ingestion.dep_graph import get_architecture_overview
 from app.ingestion.indexer import hybrid_search
@@ -125,8 +125,9 @@ async def health_check() -> dict[str, Any]:
     """Health check endpoint."""
     return {
         "status": "ok",
-        "llm_provider": settings.llm_provider,
+        "llm_provider": "freelm",
         "llm_configured": has_llm_credentials(),
+        "freelm_health": llm_health(),
     }
 
 
@@ -297,14 +298,7 @@ async def stream_chat(
         if not has_llm_credentials():
             yield {
                 "event": "error",
-                "data": json.dumps(
-                    {
-                        "message": (
-                            f"LLM API key not configured for provider '{settings.llm_provider}'. "
-                            "Add GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY in backend/.env."
-                        )
-                    }
-                ),
+                "data": json.dumps({"message": FRIENDLY_NO_PROVIDERS_MSG}),
             }
             return
 
@@ -334,6 +328,15 @@ async def stream_chat(
                         yield {
                             "event": "status",
                             "data": json.dumps({"stage": stage}),
+                        }
+
+                elif kind == "on_custom_event" and name == "mentor_token":
+                    token_text = (event.get("data") or {}).get("token", "")
+                    if token_text:
+                        streamed_any_token = True
+                        yield {
+                            "event": "token",
+                            "data": json.dumps({"token": token_text}),
                         }
 
                 elif kind == "on_chat_model_stream" and metadata.get("langgraph_node") == "senior_mentor":
