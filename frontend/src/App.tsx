@@ -18,6 +18,7 @@ import { ArchitectureModal } from "./components/ArchitectureModal";
 import { ChatPanel } from "./components/ChatPanel";
 import { CodeViewer } from "./components/CodeViewer";
 import { FileTree } from "./components/FileTree";
+import { LandingSections } from "./components/LandingSections";
 import {
   ArchitectureData,
   ChatMessageItem,
@@ -588,8 +589,11 @@ export default function App() {
           </button>
         </header>
 
-        <main className="flex-1 flex items-center justify-center px-4 pb-16">
+        <main className="flex-1 flex flex-col items-center px-4 pt-8">
           <div className="w-full max-w-xl bg-surface border border-border rounded-2xl p-7 shadow-[var(--shadow-soft)]">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-accent-soft text-accent border border-accent/25 mb-3">
+              Use it for your GSoC repos
+            </div>
             <h1 className="font-serif text-3xl text-text mb-2">
               Understand any codebase in minutes
             </h1>
@@ -717,6 +721,7 @@ export default function App() {
               </div>
             )}
           </div>
+          <LandingSections />
         </main>
       </div>
     );
