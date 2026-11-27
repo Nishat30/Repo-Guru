@@ -45,69 +45,150 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     onSendMessage(trimmed);
   };
 
-  const renderFormattedContent = (text: string, isMessageStreaming?: boolean) => {
-    const paragraphs = text.split(/\n{2,}/);
-    return (
-      <div className="space-y-3 text-[14.5px] leading-[1.68] text-text">
-        {paragraphs.map((para, pIdx) => {
-          const lines = para.split("\n");
-          return (
-            <div key={pIdx} className="whitespace-pre-wrap">
-              {lines.map((line, lIdx) => {
-                const parts = line.split(CITATION_SPLIT_RE);
-                return (
-                  <React.Fragment key={lIdx}>
-                    {parts.map((part, partIdx) => {
-                      const citeMatch = CITATION_PARSE_RE.exec(part);
-                      if (citeMatch) {
-                        const cite: CitationRef = {
-                          file: citeMatch[1],
-                          start_line: Number(citeMatch[2]),
-                          end_line: Number(citeMatch[3]),
-                        };
-                        const shortName = cite.file.split("/").pop() || cite.file;
-                        return (
-                          <button
-                            key={partIdx}
-                            type="button"
-                            onClick={() => onClickCitation(cite)}
-                            title={`Open ${cite.file} lines ${cite.start_line}-${cite.end_line}`}
-                            className="inline-flex items-center gap-1 mx-0.5 px-2 py-0.5 rounded-md text-xs font-mono bg-accent-soft text-accent hover:bg-accent hover:text-white border border-accent/25 transition-colors duration-150 align-baseline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                          >
-                            <FileCode2 className="w-3 h-3 shrink-0" />
-                            <span>
-                              {shortName}:{cite.start_line}-{cite.end_line}
-                            </span>
-                          </button>
-                        );
-                      }
+  const renderInline = (text: string, keyPrefix: string) => {
+    const parts = text.split(CITATION_SPLIT_RE);
+    return parts.map((part, partIdx) => {
+      const citeMatch = CITATION_PARSE_RE.exec(part);
+      if (citeMatch) {
+        const cite: CitationRef = {
+          file: citeMatch[1],
+          start_line: Number(citeMatch[2]),
+          end_line: Number(citeMatch[3]),
+        };
+        const shortName = cite.file.split("/").pop() || cite.file;
+        return (
+          <button
+            key={`${keyPrefix}-c-${partIdx}`}
+            type="button"
+            onClick={() => onClickCitation(cite)}
+            title={`Open ${cite.file} lines ${cite.start_line}-${cite.end_line}`}
+            className="inline-flex items-center gap-1 mx-0.5 px-2 py-0.5 rounded-md text-xs font-mono bg-accent-soft text-accent hover:bg-accent hover:text-white border border-accent/25 transition-colors duration-150 align-baseline cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <FileCode2 className="w-3 h-3 shrink-0" />
+            <span>
+              {shortName}:{cite.start_line}-{cite.end_line}
+            </span>
+          </button>
+        );
+      }
 
-                      // Render inline backticks cleanly
-                      const codeSegments = part.split(/(`[^`]+`)/g);
-                      return (
-                        <React.Fragment key={partIdx}>
-                          {codeSegments.map((seg, sIdx) =>
-                            seg.startsWith("`") && seg.endsWith("`") && seg.length > 2 ? (
-                              <code
-                                key={sIdx}
-                                className="px-1.5 py-0.5 rounded bg-surface-alt border border-border/70 font-mono text-[12.5px] text-text"
-                              >
-                                {seg.slice(1, -1)}
-                              </code>
-                            ) : (
-                              <span key={sIdx}>{seg}</span>
-                            )
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                    {lIdx < lines.length - 1 && "\n"}
-                  </React.Fragment>
+      // Parse inline `code` and **bold** without leaving raw asterisks
+      const tokenParts = part.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+      return (
+        <React.Fragment key={`${keyPrefix}-t-${partIdx}`}>
+          {tokenParts.map((seg, sIdx) => {
+            if (seg.startsWith("`") && seg.endsWith("`") && seg.length > 2) {
+              return (
+                <code
+                  key={sIdx}
+                  className="px-1.5 py-0.5 rounded bg-surface-alt border border-border/70 font-mono text-[12.5px] text-text"
+                >
+                  {seg.slice(1, -1)}
+                </code>
+              );
+            }
+            if (seg.startsWith("**") && seg.endsWith("**") && seg.length > 4) {
+              return (
+                <strong key={sIdx} className="font-semibold text-text">
+                  {seg.slice(2, -2)}
+                </strong>
+              );
+            }
+            return <span key={sIdx}>{seg}</span>;
+          })}
+        </React.Fragment>
+      );
+    });
+  };
+
+  const renderFormattedContent = (text: string, isMessageStreaming?: boolean) => {
+    const blocks = text.split(/\n{2,}/);
+    return (
+      <div className="space-y-3 text-[14.5px] leading-[1.7] text-text">
+        {blocks.map((block, bIdx) => {
+          const isLastBlock = bIdx === blocks.length - 1;
+          const lines = block.split("\n");
+
+          // Render clean list blocks (- item, * item, or 1. item)
+          const isBulletList = lines.every((l) => /^\s*[-*]\s+/.test(l));
+          if (isBulletList) {
+            return (
+              <ul key={bIdx} className="list-disc pl-5 space-y-1.5">
+                {lines.map((line, lIdx) => {
+                  const cleaned = line.replace(/^\s*[-*]\s+/, "");
+                  return (
+                    <li key={lIdx}>
+                      {renderInline(cleaned, `${bIdx}-${lIdx}`)}
+                      {isMessageStreaming && isLastBlock && lIdx === lines.length - 1 && (
+                        <span className="streaming-caret" aria-hidden="true" />
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          }
+
+          const isOrderedList = lines.every((l) => /^\s*\d+\.\s+/.test(l));
+          if (isOrderedList) {
+            return (
+              <ol key={bIdx} className="list-decimal pl-5 space-y-1.5">
+                {lines.map((line, lIdx) => {
+                  const cleaned = line.replace(/^\s*\d+\.\s+/, "");
+                  return (
+                    <li key={lIdx}>
+                      {renderInline(cleaned, `${bIdx}-${lIdx}`)}
+                      {isMessageStreaming && isLastBlock && lIdx === lines.length - 1 && (
+                        <span className="streaming-caret" aria-hidden="true" />
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            );
+          }
+
+          return (
+            <div key={bIdx} className="space-y-1.5">
+              {lines.map((line, lIdx) => {
+                const isLastLine = isMessageStreaming && isLastBlock && lIdx === lines.length - 1;
+                const h3 = /^###\s+(.+)$/.exec(line);
+                if (h3) {
+                  return (
+                    <h4 key={lIdx} className="font-serif text-base font-semibold text-text pt-1">
+                      {renderInline(h3[1], `${bIdx}-${lIdx}`)}
+                      {isLastLine && <span className="streaming-caret" aria-hidden="true" />}
+                    </h4>
+                  );
+                }
+                const h2 = /^#{1,2}\s+(.+)$/.exec(line);
+                if (h2) {
+                  return (
+                    <h3 key={lIdx} className="font-serif text-lg font-semibold text-text pt-1.5">
+                      {renderInline(h2[1], `${bIdx}-${lIdx}`)}
+                      {isLastLine && <span className="streaming-caret" aria-hidden="true" />}
+                    </h3>
+                  );
+                }
+                const bullet = /^\s*[-*]\s+(.+)$/.exec(line);
+                if (bullet) {
+                  return (
+                    <div key={lIdx} className="flex gap-2 pl-2">
+                      <span className="text-accent select-none">•</span>
+                      <div>
+                        {renderInline(bullet[1], `${bIdx}-${lIdx}`)}
+                        {isLastLine && <span className="streaming-caret" aria-hidden="true" />}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <p key={lIdx} className="whitespace-pre-wrap">
+                    {renderInline(line, `${bIdx}-${lIdx}`)}
+                    {isLastLine && <span className="streaming-caret" aria-hidden="true" />}
+                  </p>
                 );
               })}
-              {isMessageStreaming && pIdx === paragraphs.length - 1 && (
-                <span className="streaming-caret" aria-hidden="true" />
-              )}
             </div>
           );
         })}
