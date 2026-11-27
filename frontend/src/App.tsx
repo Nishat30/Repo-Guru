@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Sun,
+  X,
 } from "lucide-react";
 import { ArchitectureModal } from "./components/ArchitectureModal";
 import { ChatPanel } from "./components/ChatPanel";
@@ -38,6 +39,7 @@ const INGEST_STEPS = [
 const WORKSPACES_STORAGE_KEY = "repoguru-workspaces-v1";
 const ACTIVE_REPO_KEY = "repoguru-active-repo-v1";
 const SESSION_TTL_MS = 9 * 60 * 60 * 1000; // 9 hours
+const MAX_WORKSPACES = 5;
 
 interface SavedSession {
   repoId: string;
@@ -282,7 +284,7 @@ export default function App() {
     };
 
     const existing = loadSavedWorkspaces().filter((w) => w.repoId !== repoStatus.repo_id);
-    const nextList = [updatedEntry, ...existing].slice(0, 8);
+    const nextList = [updatedEntry, ...existing].slice(0, MAX_WORKSPACES);
     setRecentWorkspaces(nextList);
     localStorage.setItem(ACTIVE_REPO_KEY, repoStatus.repo_id);
     try {
@@ -317,6 +319,27 @@ export default function App() {
     e.preventDefault();
     const trimmed = repoUrl.trim();
     if (!trimmed || isSubmittingUrl) return;
+
+    const urlMatch = /^https:\/\/github\.com\/([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(trimmed);
+    const alreadySaved = urlMatch
+      ? recentWorkspaces.find(
+          (w) =>
+            w.owner.toLowerCase() === urlMatch[1].toLowerCase() &&
+            w.name.toLowerCase() === urlMatch[2].toLowerCase()
+        )
+      : undefined;
+    if (alreadySaved) {
+      switchToWorkspace(alreadySaved);
+      return;
+    }
+
+    if (recentWorkspaces.length >= MAX_WORKSPACES) {
+      setIngestError(
+        `You can review up to ${MAX_WORKSPACES} repositories at a time. Remove one from the sidebar or recent list first.`
+      );
+      return;
+    }
+
     setIngestError(null);
     setIsSubmittingUrl(true);
 
@@ -510,6 +533,24 @@ export default function App() {
     }
   };
 
+  const deleteWorkspace = (repoId: string) => {
+    const remaining = recentWorkspaces.filter((w) => w.repoId !== repoId);
+    setRecentWorkspaces(remaining);
+    try {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(remaining));
+    } catch {
+      // Ignore quota errors
+    }
+
+    if (repoStatus?.repo_id === repoId) {
+      if (remaining.length > 0) {
+        switchToWorkspace(remaining[0]);
+      } else {
+        openNewRepoScreen();
+      }
+    }
+  };
+
   const openNewRepoScreen = () => {
     localStorage.removeItem(ACTIVE_REPO_KEY);
     sessionExpiresAtRef.current = null;
@@ -593,16 +634,29 @@ export default function App() {
                   </div>
                   {recentWorkspaces.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                      <span>Recent:</span>
+                      <span>Recent ({recentWorkspaces.length}/{MAX_WORKSPACES}):</span>
                       {recentWorkspaces.map((w) => (
-                        <button
+                        <div
                           key={w.repoId}
-                          type="button"
-                          onClick={() => switchToWorkspace(w)}
-                          className="px-2.5 py-1 rounded-lg bg-accent-soft border border-accent/30 text-accent hover:bg-accent hover:text-white transition-colors font-medium"
+                          className="group inline-flex items-center rounded-lg bg-accent-soft border border-accent/30 overflow-hidden"
                         >
-                          {w.owner}/{w.name}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => switchToWorkspace(w)}
+                            className="px-2.5 py-1 text-accent hover:bg-accent hover:text-white transition-colors font-medium"
+                          >
+                            {w.owner}/{w.name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteWorkspace(w.repoId)}
+                            title={`Remove ${w.owner}/${w.name}`}
+                            aria-label={`Remove ${w.owner}/${w.name}`}
+                            className="px-1.5 py-1 text-accent/70 hover:text-white hover:bg-red-600 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -727,6 +781,22 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setShowChatPanel((prev) => !prev);
+              setMobilePane("chat");
+            }}
+            aria-label="Toggle AI Mentor Chat"
+            title={showChatPanel ? "Collapse AI Chat" : "Open AI Chat"}
+            className={`p-1.5 rounded-lg border transition-colors ${
+              showChatPanel
+                ? "border-accent/40 bg-accent-soft text-accent"
+                : "border-border text-text-muted hover:text-text hover:bg-surface-alt"
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
             onClick={() => setTheme(theme === "light" ? "dark" : "light")}
             aria-label="Toggle color theme"
             className="p-1.5 rounded-lg border border-border hover:bg-surface-alt transition-colors"
@@ -794,60 +864,59 @@ export default function App() {
           >
             <Network className="w-4 h-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowChatPanel((prev) => !prev);
-              setMobilePane("chat");
-            }}
-            aria-label="Toggle AI Mentor Chat"
-            title={showChatPanel ? "Collapse AI Chat" : "Open AI Chat"}
-            className={`p-2.5 rounded-xl transition-colors ${
-              showChatPanel
-                ? "bg-accent-soft text-accent"
-                : "text-text-muted hover:text-text hover:bg-surface-alt"
-            }`}
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
 
           <div className="w-7 h-px bg-border my-1" />
 
-          {/* Slack-style Recent Repositories Rail */}
-          <div className="flex-1 flex flex-col items-center gap-2.5 overflow-y-auto py-1 w-full">
+          {/* Slack-style Recent Repositories Rail (max 5) */}
+          <div className="flex-1 flex flex-col items-center gap-2.5 overflow-y-auto py-1.5 w-full">
             {recentWorkspaces.map((w) => {
               const isActive = w.repoId === repoStatus.repo_id;
               return (
-                <button
-                  key={w.repoId}
-                  type="button"
-                  onClick={() => {
-                    if (!isActive) switchToWorkspace(w);
-                  }}
-                  title={`${w.owner}/${w.name}`}
-                  aria-label={`Switch to ${w.owner}/${w.name}`}
-                  className={`w-9 h-9 rounded-xl font-serif text-xs font-semibold flex items-center justify-center transition-all duration-150 shrink-0 ${getRailColor(
-                    w.repoId
-                  )} ${
-                    isActive
-                      ? "ring-2 ring-accent ring-offset-2 ring-offset-bg scale-105"
-                      : "opacity-75 hover:opacity-100 hover:scale-105"
-                  }`}
-                >
-                  {getRepoMonogram(w.name)}
-                </button>
+                <div key={w.repoId} className="relative group shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isActive) switchToWorkspace(w);
+                    }}
+                    title={`${w.owner}/${w.name}`}
+                    aria-label={`Switch to ${w.owner}/${w.name}`}
+                    className={`w-9 h-9 rounded-xl font-serif text-xs font-semibold flex items-center justify-center transition-all duration-150 ${getRailColor(
+                      w.repoId
+                    )} ${
+                      isActive
+                        ? "ring-2 ring-accent ring-offset-2 ring-offset-bg scale-105"
+                        : "opacity-75 hover:opacity-100 hover:scale-105"
+                    }`}
+                  >
+                    {getRepoMonogram(w.name)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteWorkspace(w.repoId);
+                    }}
+                    title={`Remove ${w.owner}/${w.name}`}
+                    aria-label={`Remove ${w.owner}/${w.name}`}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm hover:bg-red-700"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
               );
             })}
 
-            <button
-              type="button"
-              onClick={openNewRepoScreen}
-              title="Add new repository"
-              aria-label="Add new repository"
-              className="w-9 h-9 rounded-xl border border-dashed border-border text-text-muted hover:text-accent hover:border-accent flex items-center justify-center transition-colors shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+            {recentWorkspaces.length < MAX_WORKSPACES && (
+              <button
+                type="button"
+                onClick={openNewRepoScreen}
+                title="Add new repository"
+                aria-label="Add new repository"
+                className="w-9 h-9 rounded-xl border border-dashed border-border text-text-muted hover:text-accent hover:border-accent flex items-center justify-center transition-colors shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </aside>
 
