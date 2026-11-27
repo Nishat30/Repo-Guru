@@ -35,6 +35,18 @@ const INGEST_STEPS = [
   { key: "indexing", label: "Indexing" },
 ];
 
+const SESSION_STORAGE_KEY = "repoguru-session-v1";
+const SESSION_TTL_MS = 9 * 60 * 60 * 1000; // 9 hours
+
+interface SavedSession {
+  repoId: string;
+  expiresAt: number;
+  openTabPaths: string[];
+  activeFilePath: string | null;
+  messages: ChatMessageItem[];
+  languageMode: LanguageMode;
+}
+
 const EXAMPLE_REPOS = [
   "https://github.com/pallets/flask",
   "https://github.com/fastapi/fastapi",
@@ -93,6 +105,8 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [activeStage, setActiveStage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const sessionExpiresAtRef = useRef<number | null>(null);
+  const restoredRef = useRef(false);
 
   // Resize mouse handlers
   useEffect(() => {
@@ -134,6 +148,88 @@ export default function App() {
       console.error("Failed to load workspace metadata:", err);
     }
   }, []);
+
+  // Restore active workspace from localStorage if within 9-hour TTL
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return;
+
+    try {
+      const saved: SavedSession = JSON.parse(raw);
+      if (!saved.repoId || !saved.expiresAt || Date.now() >= saved.expiresAt) {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return;
+      }
+
+      sessionExpiresAtRef.current = saved.expiresAt;
+      (async () => {
+        const res = await fetch(`/api/repos/${saved.repoId}/status`);
+        if (!res.ok) {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+          return;
+        }
+        const statusData: RepoStatus = await res.json();
+        if (statusData.status !== "ready") return;
+
+        setRepoStatus(statusData);
+        if (saved.languageMode) setLanguageMode(saved.languageMode);
+        if (Array.isArray(saved.messages)) {
+          setMessages(saved.messages.map((m) => ({ ...m, isStreaming: false })));
+        }
+        loadWorkspaceData(statusData.repo_id);
+
+        if (Array.isArray(saved.openTabPaths) && saved.openTabPaths.length > 0) {
+          const loadedTabs = await Promise.all(
+            saved.openTabPaths.map(async (p) => {
+              const fRes = await fetch(
+                `/api/repos/${statusData.repo_id}/file?path=${encodeURIComponent(p)}`
+              );
+              if (!fRes.ok) return null;
+              const fData = await fRes.json();
+              return {
+                path: fData.path,
+                language: fData.language,
+                content: fData.content,
+                lineCount: fData.line_count,
+              } as OpenFileTab;
+            })
+          );
+          const validTabs = loadedTabs.filter((t): t is OpenFileTab => t !== null);
+          setOpenTabs(validTabs);
+          if (saved.activeFilePath && validTabs.some((t) => t.path === saved.activeFilePath)) {
+            setActiveFilePath(saved.activeFilePath);
+          } else if (validTabs.length > 0) {
+            setActiveFilePath(validTabs[0].path);
+          }
+        }
+      })();
+    } catch {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  }, [loadWorkspaceData]);
+
+  // Persist workspace state to localStorage for 9 hours
+  useEffect(() => {
+    if (!repoStatus || repoStatus.status !== "ready") return;
+    if (!sessionExpiresAtRef.current || Date.now() >= sessionExpiresAtRef.current) {
+      sessionExpiresAtRef.current = Date.now() + SESSION_TTL_MS;
+    }
+    const payload: SavedSession = {
+      repoId: repoStatus.repo_id,
+      expiresAt: sessionExpiresAtRef.current,
+      openTabPaths: openTabs.map((t) => t.path),
+      activeFilePath,
+      messages: messages.filter((m) => !m.isStreaming),
+      languageMode,
+    };
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [repoStatus, openTabs, activeFilePath, messages, languageMode]);
 
   // Poll ingestion status until ready or failed
   useEffect(() => {
@@ -354,6 +450,8 @@ export default function App() {
   };
 
   const resetWorkspace = () => {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionExpiresAtRef.current = null;
     setRepoStatus(null);
     setTree([]);
     setOpenTabs([]);
