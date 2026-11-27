@@ -54,11 +54,17 @@ export interface SearchResultItem {
   rrf_score: number;
 }
 
+export interface LanguageStat {
+  language: string;
+  percent: number;
+}
+
 export interface ArchitectureData {
   repo_id: string;
   nodes: { id: string; language: string; in_degree: number; out_degree: number }[];
   edges: { source: string; target: string }[];
   hub_files: { file: string; imported_by: number; imports: number }[];
+  languages?: LanguageStat[];
   stats: { files: number; edges: number };
 }
 

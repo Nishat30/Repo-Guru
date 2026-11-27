@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowUp, FileCode2, Languages, Loader2, Sparkles } from "lucide-react";
-import { ChatMessageItem, CitationRef, LanguageMode } from "../types";
+import { ChatMessageItem, CitationRef, LanguageMode, LanguageStat } from "../types";
 
 interface ChatPanelProps {
   messages: ChatMessageItem[];
   languageMode: LanguageMode;
   activeStage: string | null;
   isStreaming: boolean;
+  languages?: LanguageStat[];
   onToggleLanguage: (mode: LanguageMode) => void;
   onSendMessage: (question: string) => void;
   onClickCitation: (citation: CitationRef) => void;
 }
+
+const LANG_BAR_COLORS = ["#C49A52", "#4A1728", "#182B24", "#8B7355"];
 
 const STARTER_QUESTIONS = [
   "Explain the architecture",
@@ -26,6 +29,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   languageMode,
   activeStage,
   isStreaming,
+  languages,
   onToggleLanguage,
   onSendMessage,
   onClickCitation,
@@ -236,6 +240,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Language Index Bar */}
+      {languages && languages.length > 0 && (
+        <div className="px-4 py-2 border-b border-border/70 bg-surface-alt/40 space-y-1.5 shrink-0">
+          <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.14em] text-text-muted">
+            <span>Language Index</span>
+            <span>{languages.map((l) => `${l.language} ${Math.round(l.percent)}%`).slice(0, 2).join(" · ")}</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-surface-alt overflow-hidden flex">
+            {languages.map((l, idx) => (
+              <div
+                key={l.language}
+                style={{
+                  width: `${Math.max(2, l.percent)}%`,
+                  backgroundColor: LANG_BAR_COLORS[idx % LANG_BAR_COLORS.length],
+                }}
+                title={`${l.language}: ${l.percent}%`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto px-4 py-5">
