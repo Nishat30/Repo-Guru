@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.callbacks import adispatch_custom_event
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import END, START, StateGraph
 
@@ -20,7 +21,7 @@ from app.agents.prompts import (
 )
 from app.agents.state import AgentState
 from app.core.config import get_settings
-from app.core.llm import get_chat_model
+from app.core.llm import ask, ask_response, stream
 from app.ingestion.indexer import hybrid_search
 
 logger = logging.getLogger(__name__)
@@ -111,15 +112,13 @@ async def router_node(state: AgentState) -> dict[str, Any]:
     search_query = question
 
     try:
-        llm = get_chat_model(temperature=0.0)
-        resp = await llm.ainvoke(
-            [
-                SystemMessage(content=ROUTER_PROMPT),
-                HumanMessage(content=question),
-            ]
+        raw = await ask(
+            question,
+            system_prompt=ROUTER_PROMPT,
+            model="chat:fast",
+            temperature=0.0,
         )
-        raw = str(resp.content).strip()
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        json_match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
         if json_match:
             parsed = json.loads(json_match.group(0))
             route = parsed.get("route", "general")
@@ -166,32 +165,54 @@ async def mcp_explorer_node(state: AgentState) -> dict[str, Any]:
                 tool.handle_tool_error = True
 
         tool_map = {t.name: t for t in tools}
-        llm = get_chat_model(temperature=0.1).bind_tools(tools)
+        openai_tools = [convert_to_openai_tool(t) for t in tools]
 
-        messages: list[Any] = [
-            SystemMessage(
-                content=MCP_EXPLORER_PROMPT.format(
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": MCP_EXPLORER_PROMPT.format(
                     repo_id=repo_id,
                     feedback_block=feedback_block,
-                )
-            ),
-            HumanMessage(content=f"Repository ID: {repo_id}\nQuestion: {question}"),
+                ),
+            },
+            {"role": "user", "content": f"Repository ID: {repo_id}\nQuestion: {question}"},
         ]
 
         # Up to 4 tool-calling turns
         for _ in range(4):
-            ai_msg = await llm.ainvoke(messages)
-            messages.append(ai_msg)
-            tool_calls = getattr(ai_msg, "tool_calls", None) or []
+            resp = await ask_response(
+                messages=messages,
+                model="chat:fast",
+                tools=openai_tools,
+                temperature=0.1,
+            )
+            choice_msg = resp.choices[0].message
+            tool_calls = getattr(choice_msg, "tool_calls", None) or []
+
+            assistant_entry: dict[str, Any] = {
+                "role": "assistant",
+                "content": choice_msg.content or "",
+            }
+            if tool_calls:
+                assistant_entry["tool_calls"] = tool_calls
+            messages.append(assistant_entry)
+
             if not tool_calls:
-                if ai_msg.content:
-                    findings_parts.append(str(ai_msg.content))
+                if choice_msg.content:
+                    findings_parts.append(str(choice_msg.content))
                 break
 
             for tc in tool_calls:
-                t_name = tc.get("name", "")
-                t_args = dict(tc.get("args", {}))
+                tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+                t_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
+                raw_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
+                try:
+                    t_args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                except Exception:
+                    t_args = {}
                 t_args.setdefault("repo_id", repo_id)
+
                 tool_obj = tool_map.get(t_name)
                 if not tool_obj:
                     tool_output = f"Tool '{t_name}' not found."
@@ -201,16 +222,21 @@ async def mcp_explorer_node(state: AgentState) -> dict[str, Any]:
                     except Exception as tool_exc:
                         tool_output = f"Tool error ({t_name}): {tool_exc}"
                 messages.append(
-                    ToolMessage(
-                        content=str(tool_output)[:6000],
-                        tool_call_id=tc.get("id", t_name),
-                    )
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc_id or t_name,
+                        "content": str(tool_output)[:6000],
+                    }
                 )
         else:
             # Summarize after max tool rounds
-            final_msg = await llm.ainvoke(messages)
-            if final_msg.content:
-                findings_parts.append(str(final_msg.content))
+            final_resp = await ask_response(
+                messages=messages,
+                model="chat:fast",
+                temperature=0.1,
+            )
+            if final_resp.choices and final_resp.choices[0].message.content:
+                findings_parts.append(str(final_resp.choices[0].message.content))
 
     except Exception as exc:
         logger.warning("MCP explorer error: %s", exc)
@@ -271,8 +297,8 @@ def _should_retry_exploration(state: AgentState) -> str:
     return "senior_mentor"
 
 
-def build_mentor_messages(state: AgentState) -> list[Any]:
-    """Construct messages for the Senior Mentor node from verified evidence."""
+def build_mentor_messages(state: AgentState) -> list[dict[str, str]]:
+    """Construct OpenAI-style messages for the Senior Mentor node from verified evidence."""
     repo_id = state["repo_id"]
     language_mode = state.get("language_mode", "english")
     lang_instructions = (
@@ -307,17 +333,20 @@ def build_mentor_messages(state: AgentState) -> list[Any]:
     )
 
     return [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"{history_text}{evidence}\n\n## User Question\n{state['question']}"),
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"{history_text}{evidence}\n\n## User Question\n{state['question']}"},
     ]
 
 
 async def senior_mentor_node(state: AgentState) -> dict[str, Any]:
-    """Generate final grounded response in English or Hinglish."""
-    llm = get_chat_model(temperature=0.2, streaming=True)
+    """Stream final grounded response in English or Hinglish via freelm."""
     messages = build_mentor_messages(state)
-    response = await llm.ainvoke(messages)
-    answer = str(response.content)
+    chunks: list[str] = []
+    async for chunk in stream(messages=messages, model="chat:large", temperature=0.2):
+        chunks.append(chunk)
+        await adispatch_custom_event("mentor_token", {"token": chunk})
+
+    answer = "".join(chunks)
 
     # Filter cited tags against workspace to guarantee 100% valid citations
     raw_cites = [
