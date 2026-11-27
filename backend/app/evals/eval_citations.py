@@ -67,6 +67,7 @@ EVAL_CASES = [
 
 def run_eval() -> int:
     settings = get_settings()
+    settings.qdrant_url = ""
     eval_repo_id = "eval_sample_repo"
     workspace = (settings.workspaces_dir / eval_repo_id).resolve()
 
