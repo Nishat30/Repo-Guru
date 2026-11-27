@@ -126,6 +126,8 @@ export default function App() {
 
   // Sidebar & Modals
   const [sidebarTab, setSidebarTab] = useState<"explorer" | "search">("explorer");
+  const [showLeftSidebar, setShowLeftSidebar] = useState(true);
+  const [showChatPanel, setShowChatPanel] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -744,13 +746,18 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setSidebarTab("explorer");
-              setMobilePane("explorer");
+              if (showLeftSidebar && sidebarTab === "explorer") {
+                setShowLeftSidebar(false);
+              } else {
+                setSidebarTab("explorer");
+                setShowLeftSidebar(true);
+                setMobilePane("explorer");
+              }
             }}
-            aria-label="Explorer"
-            title="Explorer"
+            aria-label="Toggle Explorer"
+            title={showLeftSidebar && sidebarTab === "explorer" ? "Collapse Explorer" : "Explorer"}
             className={`p-2.5 rounded-xl transition-colors ${
-              sidebarTab === "explorer"
+              showLeftSidebar && sidebarTab === "explorer"
                 ? "bg-accent-soft text-accent"
                 : "text-text-muted hover:text-text hover:bg-surface-alt"
             }`}
@@ -760,13 +767,18 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setSidebarTab("search");
-              setMobilePane("explorer");
+              if (showLeftSidebar && sidebarTab === "search") {
+                setShowLeftSidebar(false);
+              } else {
+                setSidebarTab("search");
+                setShowLeftSidebar(true);
+                setMobilePane("explorer");
+              }
             }}
-            aria-label="Code Search"
-            title="Search"
+            aria-label="Toggle Code Search"
+            title={showLeftSidebar && sidebarTab === "search" ? "Collapse Search" : "Search"}
             className={`p-2.5 rounded-xl transition-colors ${
-              sidebarTab === "search"
+              showLeftSidebar && sidebarTab === "search"
                 ? "bg-accent-soft text-accent"
                 : "text-text-muted hover:text-text hover:bg-surface-alt"
             }`}
@@ -781,6 +793,22 @@ export default function App() {
             className="p-2.5 rounded-xl text-text-muted hover:text-text hover:bg-surface-alt transition-colors"
           >
             <Network className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowChatPanel((prev) => !prev);
+              setMobilePane("chat");
+            }}
+            aria-label="Toggle AI Mentor Chat"
+            title={showChatPanel ? "Collapse AI Chat" : "Open AI Chat"}
+            className={`p-2.5 rounded-xl transition-colors ${
+              showChatPanel
+                ? "bg-accent-soft text-accent"
+                : "text-text-muted hover:text-text hover:bg-surface-alt"
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
           </button>
 
           <div className="w-7 h-px bg-border my-1" />
@@ -824,12 +852,14 @@ export default function App() {
         </aside>
 
         {/* Left Sidebar (Explorer / Search) */}
-        <section
-          style={{ width: leftWidth }}
-          className={`${
-            mobilePane === "explorer" ? "flex w-full lg:w-auto" : "hidden lg:flex"
-          } flex-col border-r border-border bg-surface shrink-0 min-h-0`}
-        >
+        {showLeftSidebar && (
+          <>
+            <section
+              style={{ width: leftWidth }}
+              className={`${
+                mobilePane === "explorer" ? "flex w-full lg:w-auto" : "hidden lg:flex"
+              } flex-col border-r border-border bg-surface shrink-0 min-h-0`}
+            >
           {sidebarTab === "explorer" ? (
             <FileTree
               tree={tree}
@@ -885,18 +915,20 @@ export default function App() {
               </div>
             </div>
           )}
-        </section>
+            </section>
 
-        {/* Left Resize Handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onMouseDown={() => {
-            draggingRef.current = "left";
-            document.body.style.cursor = "col-resize";
-          }}
-          className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
-        />
+            {/* Left Resize Handle */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={() => {
+                draggingRef.current = "left";
+                document.body.style.cursor = "col-resize";
+              }}
+              className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
+            />
+          </>
+        )}
 
         {/* Center Code Viewer */}
         <main
@@ -913,34 +945,37 @@ export default function App() {
           />
         </main>
 
-        {/* Right Resize Handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onMouseDown={() => {
-            draggingRef.current = "right";
-            document.body.style.cursor = "col-resize";
-          }}
-          className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
-        />
+        {/* Right Resize Handle + Agent Chat Panel */}
+        {showChatPanel && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={() => {
+                draggingRef.current = "right";
+                document.body.style.cursor = "col-resize";
+              }}
+              className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
+            />
 
-        {/* Right Agent Chat Panel */}
-        <aside
-          style={{ width: rightWidth }}
-          className={`${
-            mobilePane === "chat" ? "flex w-full lg:w-auto" : "hidden lg:flex"
-          } flex-col border-l border-border shrink-0 min-h-0`}
-        >
-          <ChatPanel
-            messages={messages}
-            languageMode={languageMode}
-            activeStage={activeStage}
-            isStreaming={isStreaming}
-            onToggleLanguage={setLanguageMode}
-            onSendMessage={handleSendMessage}
-            onClickCitation={(cite) => openFile(cite.file, cite)}
-          />
-        </aside>
+            <aside
+              style={{ width: rightWidth }}
+              className={`${
+                mobilePane === "chat" ? "flex w-full lg:w-auto" : "hidden lg:flex"
+              } flex-col border-l border-border shrink-0 min-h-0`}
+            >
+              <ChatPanel
+                messages={messages}
+                languageMode={languageMode}
+                activeStage={activeStage}
+                isStreaming={isStreaming}
+                onToggleLanguage={setLanguageMode}
+                onSendMessage={handleSendMessage}
+                onClickCitation={(cite) => openFile(cite.file, cite)}
+              />
+            </aside>
+          </>
+        )}
       </div>
 
       <ArchitectureModal
