@@ -301,7 +301,7 @@ async def stream_chat(
                     {
                         "message": (
                             f"LLM API key not configured for provider '{settings.llm_provider}'. "
-                            "Add OPENAI_API_KEY or ANTHROPIC_API_KEY in backend/.env."
+                            "Add GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY in backend/.env."
                         )
                     }
                 ),
@@ -373,3 +373,4 @@ async def stream_chat(
             }
 
     return EventSourceResponse(event_generator())
+

@@ -16,7 +16,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    llm_provider: Literal["openai", "anthropic"] = "openai"
+    llm_provider: Literal["openai", "anthropic", "groq"] = "openai"
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
@@ -76,3 +79,4 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.ensure_dirs()
     return settings
+

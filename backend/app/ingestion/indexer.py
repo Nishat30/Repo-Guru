@@ -1,5 +1,6 @@
 """Hybrid Qdrant vector + BM25 keyword indexer and Reciprocal Rank Fusion retriever."""
 
+import atexit
 import json
 import re
 import uuid
@@ -35,9 +36,12 @@ def get_qdrant_client() -> QdrantClient:
     """Return a singleton QdrantClient (remote URL or local persistent path)."""
     settings = get_settings()
     if settings.qdrant_url:
-        return QdrantClient(url=settings.qdrant_url)
-    settings.ensure_dirs()
-    return QdrantClient(path=str(settings.qdrant_dir))
+        client = QdrantClient(url=settings.qdrant_url)
+    else:
+        settings.ensure_dirs()
+        client = QdrantClient(path=str(settings.qdrant_dir))
+    atexit.register(client.close)
+    return client
 
 
 def _collection_name(repo_id: str) -> str:
@@ -169,3 +173,4 @@ def hybrid_search(repo_id: str, query: str, top_k: int = 8) -> list[dict[str, An
         item["rrf_score"] = round(fused_scores[key], 6)
         results.append(item)
     return results
+

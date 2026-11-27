@@ -7,6 +7,7 @@ from typing import Sequence
 from langchain_anthropic import ChatAnthropic
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from app.core.config import get_settings
@@ -43,9 +44,19 @@ def get_chat_model(
     temperature: float = 0.2,
     streaming: bool = False,
 ) -> BaseChatModel:
-    """Instantiate configured chat model for OpenAI or Anthropic."""
+    """Instantiate configured chat model for OpenAI, Anthropic, or Groq."""
     settings = get_settings()
     chosen = (provider or settings.llm_provider).lower()
+
+    if chosen == "groq":
+        if not settings.groq_api_key:
+            raise ValueError("GROQ_API_KEY is not configured.")
+        return ChatGroq(
+            model=settings.groq_model,
+            api_key=settings.groq_api_key,
+            temperature=temperature,
+            streaming=streaming,
+        )
 
     if chosen == "anthropic":
         if not settings.anthropic_api_key:
@@ -85,6 +96,9 @@ def get_embeddings_model() -> tuple[Embeddings, int]:
 def has_llm_credentials() -> bool:
     """Check whether at least one valid LLM API key is configured."""
     settings = get_settings()
+    if settings.llm_provider == "groq":
+        return bool(settings.groq_api_key and not settings.groq_api_key.startswith("gsk_your-"))
     if settings.llm_provider == "anthropic":
         return bool(settings.anthropic_api_key and not settings.anthropic_api_key.startswith("sk-ant-your-"))
     return bool(settings.openai_api_key and not settings.openai_api_key.startswith("sk-your-"))
+
