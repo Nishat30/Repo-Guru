@@ -22,6 +22,7 @@ import { FileTree } from "./components/FileTree";
 import { LandingPage } from "./components/LandingPage";
 import { ShareSnapshotModal } from "./components/ShareSnapshotModal";
 import { SnapshotViewer } from "./components/SnapshotViewer";
+import { apiUrl } from "./config";
 import {
   ArchitectureData,
   ChatMessageItem,
@@ -192,8 +193,8 @@ function MainApp() {
   const loadWorkspaceData = useCallback(async (repoId: string) => {
     try {
       const [treeRes, archRes] = await Promise.all([
-        fetch(`/api/repos/${repoId}/tree`),
-        fetch(`/api/repos/${repoId}/architecture`),
+        fetch(apiUrl(`/api/repos/${repoId}/tree`)),
+        fetch(apiUrl(`/api/repos/${repoId}/architecture`)),
       ]);
       if (treeRes.ok) {
         const tData = await treeRes.json();
@@ -211,7 +212,7 @@ function MainApp() {
   const switchToWorkspace = useCallback(
     async (saved: SavedSession) => {
       try {
-        const res = await fetch(`/api/repos/${saved.repoId}/status`);
+        const res = await fetch(apiUrl(`/api/repos/${saved.repoId}/status`));
         if (!res.ok) return;
         const statusData: RepoStatus = await res.json();
         if (statusData.status !== "ready") return;
@@ -233,7 +234,7 @@ function MainApp() {
           const loadedTabs = await Promise.all(
             saved.openTabPaths.map(async (p) => {
               const fRes = await fetch(
-                `/api/repos/${statusData.repo_id}/file?path=${encodeURIComponent(p)}`
+                apiUrl(`/api/repos/${statusData.repo_id}/file?path=${encodeURIComponent(p)}`)
               );
               if (!fRes.ok) return null;
               const fData = await fRes.json();
@@ -315,7 +316,7 @@ function MainApp() {
     }
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch(`/api/repos/${repoStatus.repo_id}/status`);
+        const res = await fetch(apiUrl(`/api/repos/${repoStatus.repo_id}/status`));
         if (!res.ok) return;
         const data: RepoStatus = await res.json();
         setRepoStatus(data);
@@ -358,7 +359,7 @@ function MainApp() {
     setIsSubmittingUrl(true);
 
     try {
-      const res = await fetch("/api/repos/ingest", {
+      const res = await fetch(apiUrl("/api/repos/ingest"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: trimmed }),
@@ -392,7 +393,7 @@ function MainApp() {
 
       try {
         const res = await fetch(
-          `/api/repos/${repoStatus.repo_id}/file?path=${encodeURIComponent(filePath)}`
+          apiUrl(`/api/repos/${repoStatus.repo_id}/file?path=${encodeURIComponent(filePath)}`)
         );
         if (!res.ok) return;
         const data = await res.json();
@@ -429,7 +430,7 @@ function MainApp() {
     setIsSearching(true);
     try {
       const res = await fetch(
-        `/api/repos/${repoStatus.repo_id}/search?q=${encodeURIComponent(searchQuery.trim())}`
+        apiUrl(`/api/repos/${repoStatus.repo_id}/search?q=${encodeURIComponent(searchQuery.trim())}`)
       );
       if (res.ok) {
         const data = await res.json();
@@ -465,7 +466,7 @@ function MainApp() {
     setActiveStage("Routing");
 
     try {
-      const response = await fetch("/api/chat/stream", {
+      const response = await fetch(apiUrl("/api/chat/stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
