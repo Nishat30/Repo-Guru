@@ -11,6 +11,7 @@ import {
   Network,
   Plus,
   Search,
+  Share2,
   Sun,
   X,
 } from "lucide-react";
@@ -19,6 +20,8 @@ import { ChatPanel } from "./components/ChatPanel";
 import { CodeViewer } from "./components/CodeViewer";
 import { FileTree } from "./components/FileTree";
 import { LandingPage } from "./components/LandingPage";
+import { ShareSnapshotModal } from "./components/ShareSnapshotModal";
+import { SnapshotViewer } from "./components/SnapshotViewer";
 import {
   ArchitectureData,
   ChatMessageItem,
@@ -105,6 +108,15 @@ function getStepState(currentStatus: string, stepKey: string): "done" | "active"
 }
 
 export default function App() {
+  const isShareRoute =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/share");
+  if (isShareRoute) {
+    return <SnapshotViewer />;
+  }
+  return <MainApp />;
+}
+
+function MainApp() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("repoguru-theme");
     return saved === "dark" ? "dark" : "light";
@@ -136,6 +148,7 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [archOpen, setArchOpen] = useState(false);
   const [archData, setArchData] = useState<ArchitectureData | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Mobile responsive pane switcher
   const [mobilePane, setMobilePane] = useState<"explorer" | "code" | "chat">("chat");
@@ -638,6 +651,16 @@ export default function App() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setShareOpen(true)}
+            aria-label="Share Analysis"
+            title="Share encrypted read-only snapshot"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-accent-soft text-accent border border-accent/30 hover:bg-accent hover:text-white transition-colors"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Share Analysis</span>
+          </button>
+          <button
+            type="button"
             onClick={openNewRepoScreen}
             className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs border border-border bg-surface-alt hover:border-accent transition-colors"
           >
@@ -918,6 +941,18 @@ export default function App() {
         data={archData}
         onClose={() => setArchOpen(false)}
         onSelectFile={(path) => openFile(path)}
+      />
+
+      <ShareSnapshotModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        snapshotInput={{
+          repoStatus,
+          tree,
+          archData,
+          openTabs,
+          messages,
+        }}
       />
     </div>
   );
