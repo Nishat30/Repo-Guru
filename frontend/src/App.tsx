@@ -11,12 +11,17 @@ import {
   Network,
   Plus,
   Search,
+  Share2,
   Sun,
+  X,
 } from "lucide-react";
 import { ArchitectureModal } from "./components/ArchitectureModal";
 import { ChatPanel } from "./components/ChatPanel";
 import { CodeViewer } from "./components/CodeViewer";
 import { FileTree } from "./components/FileTree";
+import { LandingPage } from "./components/LandingPage";
+import { ShareSnapshotModal } from "./components/ShareSnapshotModal";
+import { SnapshotViewer } from "./components/SnapshotViewer";
 import {
   ArchitectureData,
   ChatMessageItem,
@@ -35,6 +40,59 @@ const INGEST_STEPS = [
   { key: "indexing", label: "Indexing" },
 ];
 
+const WORKSPACES_STORAGE_KEY = "repoguru-workspaces-v1";
+const ACTIVE_REPO_KEY = "repoguru-active-repo-v1";
+const SESSION_TTL_MS = 9 * 60 * 60 * 1000; // 9 hours
+const MAX_WORKSPACES = 5;
+
+interface SavedSession {
+  repoId: string;
+  owner: string;
+  name: string;
+  expiresAt: number;
+  openTabPaths: string[];
+  activeFilePath: string | null;
+  messages: ChatMessageItem[];
+  languageMode: LanguageMode;
+}
+
+function loadSavedWorkspaces(): SavedSession[] {
+  try {
+    const raw = localStorage.getItem(WORKSPACES_STORAGE_KEY);
+    if (!raw) return [];
+    const list: SavedSession[] = JSON.parse(raw);
+    const now = Date.now();
+    const valid = list.filter((w) => w.repoId && w.expiresAt && w.expiresAt > now);
+    if (valid.length !== list.length) {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(valid));
+    }
+    return valid;
+  } catch {
+    return [];
+  }
+}
+
+function getRepoMonogram(name: string): string {
+  const clean = name.replace(/[^A-Za-z0-9]/g, "");
+  return (clean.slice(0, 2) || "RG").toUpperCase();
+}
+
+const RAIL_COLORS = [
+  "bg-[#7F1D1D] text-[#FAF9F5]",
+  "bg-[#3B1D52] text-[#FAF9F5]",
+  "bg-[#1E40AF] text-[#FAF9F5]",
+  "bg-[#14532D] text-[#FAF9F5]",
+  "bg-[#92400E] text-[#FAF9F5]",
+];
+
+function getRailColor(repoId: string): string {
+  let hash = 0;
+  for (let i = 0; i < repoId.length; i++) {
+    hash = (hash * 31 + repoId.charCodeAt(i)) >>> 0;
+  }
+  return RAIL_COLORS[hash % RAIL_COLORS.length];
+}
+
 const EXAMPLE_REPOS = [
   "https://github.com/pallets/flask",
   "https://github.com/fastapi/fastapi",
@@ -50,6 +108,15 @@ function getStepState(currentStatus: string, stepKey: string): "done" | "active"
 }
 
 export default function App() {
+  const isShareRoute =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/share");
+  if (isShareRoute) {
+    return <SnapshotViewer />;
+  }
+  return <MainApp />;
+}
+
+function MainApp() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("repoguru-theme");
     return saved === "dark" ? "dark" : "light";
@@ -74,11 +141,14 @@ export default function App() {
 
   // Sidebar & Modals
   const [sidebarTab, setSidebarTab] = useState<"explorer" | "search">("explorer");
+  const [showLeftSidebar, setShowLeftSidebar] = useState(true);
+  const [showChatPanel, setShowChatPanel] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [archOpen, setArchOpen] = useState(false);
   const [archData, setArchData] = useState<ArchitectureData | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // Mobile responsive pane switcher
   const [mobilePane, setMobilePane] = useState<"explorer" | "code" | "chat">("chat");
@@ -93,6 +163,9 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [activeStage, setActiveStage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [recentWorkspaces, setRecentWorkspaces] = useState<SavedSession[]>(() => loadSavedWorkspaces());
+  const sessionExpiresAtRef = useRef<number | null>(null);
+  const restoredRef = useRef(false);
 
   // Resize mouse handlers
   useEffect(() => {
@@ -135,6 +208,106 @@ export default function App() {
     }
   }, []);
 
+  const switchToWorkspace = useCallback(
+    async (saved: SavedSession) => {
+      try {
+        const res = await fetch(`/api/repos/${saved.repoId}/status`);
+        if (!res.ok) return;
+        const statusData: RepoStatus = await res.json();
+        if (statusData.status !== "ready") return;
+
+        sessionExpiresAtRef.current = saved.expiresAt;
+        localStorage.setItem(ACTIVE_REPO_KEY, saved.repoId);
+        setRepoStatus(statusData);
+        setHighlightedCitation(null);
+        setSearchResults([]);
+        setLanguageMode(saved.languageMode || "english");
+        setMessages(
+          Array.isArray(saved.messages)
+            ? saved.messages.map((m) => ({ ...m, isStreaming: false }))
+            : []
+        );
+        loadWorkspaceData(statusData.repo_id);
+
+        if (Array.isArray(saved.openTabPaths) && saved.openTabPaths.length > 0) {
+          const loadedTabs = await Promise.all(
+            saved.openTabPaths.map(async (p) => {
+              const fRes = await fetch(
+                `/api/repos/${statusData.repo_id}/file?path=${encodeURIComponent(p)}`
+              );
+              if (!fRes.ok) return null;
+              const fData = await fRes.json();
+              return {
+                path: fData.path,
+                language: fData.language,
+                content: fData.content,
+                lineCount: fData.line_count,
+              } as OpenFileTab;
+            })
+          );
+          const validTabs = loadedTabs.filter((t): t is OpenFileTab => t !== null);
+          setOpenTabs(validTabs);
+          if (saved.activeFilePath && validTabs.some((t) => t.path === saved.activeFilePath)) {
+            setActiveFilePath(saved.activeFilePath);
+          } else if (validTabs.length > 0) {
+            setActiveFilePath(validTabs[0].path);
+          } else {
+            setActiveFilePath(null);
+          }
+        } else {
+          setOpenTabs([]);
+          setActiveFilePath(null);
+        }
+      } catch (err) {
+        console.error("Failed to restore workspace:", err);
+      }
+    },
+    [loadWorkspaceData]
+  );
+
+  // Restore last active workspace from localStorage if within 9-hour TTL
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const savedList = loadSavedWorkspaces();
+    setRecentWorkspaces(savedList);
+    if (savedList.length === 0) return;
+
+    const activeId = localStorage.getItem(ACTIVE_REPO_KEY);
+    const target = savedList.find((w) => w.repoId === activeId) || savedList[0];
+    if (target) {
+      switchToWorkspace(target);
+    }
+  }, [switchToWorkspace]);
+
+  // Persist current workspace into recentWorkspaces (9-hour TTL)
+  useEffect(() => {
+    if (!repoStatus || repoStatus.status !== "ready") return;
+    if (!sessionExpiresAtRef.current || Date.now() >= sessionExpiresAtRef.current) {
+      sessionExpiresAtRef.current = Date.now() + SESSION_TTL_MS;
+    }
+    const updatedEntry: SavedSession = {
+      repoId: repoStatus.repo_id,
+      owner: repoStatus.owner,
+      name: repoStatus.name,
+      expiresAt: sessionExpiresAtRef.current,
+      openTabPaths: openTabs.map((t) => t.path),
+      activeFilePath,
+      messages: messages.filter((m) => !m.isStreaming),
+      languageMode,
+    };
+
+    const existing = loadSavedWorkspaces().filter((w) => w.repoId !== repoStatus.repo_id);
+    const nextList = [updatedEntry, ...existing].slice(0, MAX_WORKSPACES);
+    setRecentWorkspaces(nextList);
+    localStorage.setItem(ACTIVE_REPO_KEY, repoStatus.repo_id);
+    try {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(nextList));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [repoStatus, openTabs, activeFilePath, messages, languageMode]);
+
   // Poll ingestion status until ready or failed
   useEffect(() => {
     if (!repoStatus || repoStatus.status === "ready" || repoStatus.status === "failed") {
@@ -160,6 +333,27 @@ export default function App() {
     e.preventDefault();
     const trimmed = repoUrl.trim();
     if (!trimmed || isSubmittingUrl) return;
+
+    const urlMatch = /^https:\/\/github\.com\/([^/]+)\/([^/?#]+?)(?:\.git)?\/?$/i.exec(trimmed);
+    const alreadySaved = urlMatch
+      ? recentWorkspaces.find(
+          (w) =>
+            w.owner.toLowerCase() === urlMatch[1].toLowerCase() &&
+            w.name.toLowerCase() === urlMatch[2].toLowerCase()
+        )
+      : undefined;
+    if (alreadySaved) {
+      switchToWorkspace(alreadySaved);
+      return;
+    }
+
+    if (recentWorkspaces.length >= MAX_WORKSPACES) {
+      setIngestError(
+        `You can review up to ${MAX_WORKSPACES} repositories at a time. Remove one from the sidebar or recent list first.`
+      );
+      return;
+    }
+
     setIngestError(null);
     setIsSubmittingUrl(true);
 
@@ -353,8 +547,29 @@ export default function App() {
     }
   };
 
-  const resetWorkspace = () => {
+  const deleteWorkspace = (repoId: string) => {
+    const remaining = recentWorkspaces.filter((w) => w.repoId !== repoId);
+    setRecentWorkspaces(remaining);
+    try {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(remaining));
+    } catch {
+      // Ignore quota errors
+    }
+
+    if (repoStatus?.repo_id === repoId) {
+      if (remaining.length > 0) {
+        switchToWorkspace(remaining[0]);
+      } else {
+        openNewRepoScreen();
+      }
+    }
+  };
+
+  const openNewRepoScreen = () => {
+    localStorage.removeItem(ACTIVE_REPO_KEY);
+    sessionExpiresAtRef.current = null;
     setRepoStatus(null);
+    setRepoUrl("");
     setTree([]);
     setOpenTabs([]);
     setActiveFilePath(null);
@@ -364,128 +579,24 @@ export default function App() {
     setIngestError(null);
   };
 
-  // Landing / Ingestion Screen
+  // Landing / Ingestion Screen (always light parchment; workspace keeps its own theme)
   if (!repoStatus || repoStatus.status !== "ready") {
     return (
-      <div className="min-h-screen flex flex-col bg-bg text-text">
-        <header className="flex items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center font-serif font-semibold text-lg">
-              R
-            </div>
-            <span className="font-serif text-xl font-semibold tracking-tight">RepoGuru</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-            aria-label="Toggle color theme"
-            className="p-2 rounded-xl border border-border bg-surface hover:bg-surface-alt transition-colors"
-          >
-            {theme === "light" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </button>
-        </header>
-
-        <main className="flex-1 flex items-center justify-center px-4 pb-16">
-          <div className="w-full max-w-xl bg-surface border border-border rounded-2xl p-7 shadow-[var(--shadow-soft)]">
-            <h1 className="font-serif text-3xl text-text mb-2">
-              Understand any codebase in minutes
-            </h1>
-            <p className="text-sm text-text-muted mb-6">
-              Paste a public GitHub repository URL. RepoGuru parses ASTs, maps dependencies, and pairs you with a bilingual Senior Mentor.
-            </p>
-
-            <form onSubmit={handleIngestSubmit} className="space-y-3">
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="url"
-                  required
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  placeholder="Paste a GitHub repository to begin (https://github.com/owner/repo)"
-                  aria-label="GitHub repository URL"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-bg border border-border text-sm text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent"
-                />
-                <button
-                  type="submit"
-                  disabled={isSubmittingUrl || (!!repoStatus && repoStatus.status !== "failed")}
-                  className="px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors shrink-0"
-                >
-                  {isSubmittingUrl ? "Starting..." : "Analyze Repo"}
-                </button>
-              </div>
-
-              {!repoStatus && (
-                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-text-muted">
-                  <span>Try:</span>
-                  {EXAMPLE_REPOS.map((ex) => (
-                    <button
-                      key={ex}
-                      type="button"
-                      onClick={() => setRepoUrl(ex)}
-                      className="px-2.5 py-1 rounded-lg bg-surface-alt border border-border hover:border-accent text-text transition-colors"
-                    >
-                      {ex.replace("https://github.com/", "")}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </form>
-
-            {(ingestError || repoStatus?.status === "failed") && (
-              <div className="mt-5 flex items-start gap-2.5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-sm text-red-700 dark:text-red-300">
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                <div>
-                  <div className="font-medium">Ingestion failed</div>
-                  <div className="text-xs opacity-90 mt-0.5">
-                    {ingestError || repoStatus?.error_message}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {repoStatus && repoStatus.status !== "failed" && (
-              <div className="mt-6 pt-5 border-t border-border space-y-4">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-text">
-                    {repoStatus.owner}/{repoStatus.name}
-                  </span>
-                  <span className="text-text-muted">{repoStatus.progress}%</span>
-                </div>
-
-                {/* Progress Stepper */}
-                <div className="grid grid-cols-4 gap-2">
-                  {INGEST_STEPS.map((step) => {
-                    const st = getStepState(repoStatus.status, step.key);
-                    return (
-                      <div
-                        key={step.key}
-                        className={`flex flex-col items-center gap-1.5 p-2.5 rounded-xl border text-xs transition-colors ${
-                          st === "done"
-                            ? "bg-accent-soft border-accent/30 text-text"
-                            : st === "active"
-                              ? "bg-surface-alt border-accent text-accent font-medium"
-                              : "bg-bg border-border text-text-muted"
-                        }`}
-                      >
-                        {st === "done" ? (
-                          <CheckCircle2 className="w-4 h-4 text-accent" />
-                        ) : st === "active" ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-accent" />
-                        ) : (
-                          <span className="w-4 h-4 rounded-full border border-border" />
-                        )}
-                        <span>{step.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <p className="text-xs text-text-muted text-center">{repoStatus.step_message}</p>
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
+      <LandingPage
+        repoUrl={repoUrl}
+        onChangeRepoUrl={setRepoUrl}
+        onSubmitRepo={handleIngestSubmit}
+        isSubmittingUrl={isSubmittingUrl}
+        repoStatus={repoStatus}
+        ingestError={ingestError}
+        recentWorkspaces={recentWorkspaces}
+        maxWorkspaces={MAX_WORKSPACES}
+        onSelectRecent={(repoId) => {
+          const found = recentWorkspaces.find((w) => w.repoId === repoId);
+          if (found) switchToWorkspace(found);
+        }}
+        onDeleteRecent={deleteWorkspace}
+      />
     );
   }
 
@@ -496,10 +607,12 @@ export default function App() {
       <header className="h-11 px-3 border-b border-border bg-surface flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-accent text-white flex items-center justify-center font-serif font-semibold text-sm">
-              R
-            </div>
-            <span className="font-serif text-base font-semibold">RepoGuru</span>
+            <img
+              src="/favicon.svg"
+              alt="RepoGuru"
+              className="w-6 h-6 rounded-md border border-border"
+            />
+            <span className="font-serif text-lg font-semibold">RepoGuru</span>
           </div>
           <span className="text-border">/</span>
           <div className="flex items-center gap-1.5 text-xs font-medium text-text truncate">
@@ -538,11 +651,37 @@ export default function App() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={resetWorkspace}
+            onClick={() => setShareOpen(true)}
+            aria-label="Share Analysis"
+            title="Share encrypted read-only snapshot"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-accent-soft text-accent border border-accent/30 hover:bg-accent hover:text-white transition-colors"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Share Analysis</span>
+          </button>
+          <button
+            type="button"
+            onClick={openNewRepoScreen}
             className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs border border-border bg-surface-alt hover:border-accent transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             New Repo
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowChatPanel((prev) => !prev);
+              setMobilePane("chat");
+            }}
+            aria-label="Toggle AI Mentor Chat"
+            title={showChatPanel ? "Collapse AI Chat" : "Open AI Chat"}
+            className={`p-1.5 rounded-lg border transition-colors ${
+              showChatPanel
+                ? "border-accent/40 bg-accent-soft text-accent"
+                : "border-border text-text-muted hover:text-text hover:bg-surface-alt"
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
@@ -557,21 +696,26 @@ export default function App() {
 
       {/* Main Three-Pane Body */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Thin Activity Bar */}
+        {/* Thin Activity Bar + Slack-style Repo Switcher Rail */}
         <aside
           aria-label="Workspace activity bar"
-          className="w-12 border-r border-border bg-surface-alt/50 flex flex-col items-center py-2.5 gap-2 shrink-0"
+          className="w-14 border-r border-border bg-surface-alt/50 flex flex-col items-center py-2.5 gap-2 shrink-0"
         >
           <button
             type="button"
             onClick={() => {
-              setSidebarTab("explorer");
-              setMobilePane("explorer");
+              if (showLeftSidebar && sidebarTab === "explorer") {
+                setShowLeftSidebar(false);
+              } else {
+                setSidebarTab("explorer");
+                setShowLeftSidebar(true);
+                setMobilePane("explorer");
+              }
             }}
-            aria-label="Explorer"
-            title="Explorer"
+            aria-label="Toggle Explorer"
+            title={showLeftSidebar && sidebarTab === "explorer" ? "Collapse Explorer" : "Explorer"}
             className={`p-2.5 rounded-xl transition-colors ${
-              sidebarTab === "explorer"
+              showLeftSidebar && sidebarTab === "explorer"
                 ? "bg-accent-soft text-accent"
                 : "text-text-muted hover:text-text hover:bg-surface-alt"
             }`}
@@ -581,13 +725,18 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setSidebarTab("search");
-              setMobilePane("explorer");
+              if (showLeftSidebar && sidebarTab === "search") {
+                setShowLeftSidebar(false);
+              } else {
+                setSidebarTab("search");
+                setShowLeftSidebar(true);
+                setMobilePane("explorer");
+              }
             }}
-            aria-label="Code Search"
-            title="Search"
+            aria-label="Toggle Code Search"
+            title={showLeftSidebar && sidebarTab === "search" ? "Collapse Search" : "Search"}
             className={`p-2.5 rounded-xl transition-colors ${
-              sidebarTab === "search"
+              showLeftSidebar && sidebarTab === "search"
                 ? "bg-accent-soft text-accent"
                 : "text-text-muted hover:text-text hover:bg-surface-alt"
             }`}
@@ -603,15 +752,71 @@ export default function App() {
           >
             <Network className="w-4 h-4" />
           </button>
+
+          <div className="w-7 h-px bg-border my-1" />
+
+          {/* Slack-style Recent Repositories Rail (max 5) */}
+          <div className="flex-1 flex flex-col items-center gap-2.5 overflow-y-auto py-1.5 w-full">
+            {recentWorkspaces.map((w) => {
+              const isActive = w.repoId === repoStatus.repo_id;
+              return (
+                <div key={w.repoId} className="relative group shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isActive) switchToWorkspace(w);
+                    }}
+                    title={`${w.owner}/${w.name}`}
+                    aria-label={`Switch to ${w.owner}/${w.name}`}
+                    className={`w-9 h-9 rounded-xl font-serif text-xs font-semibold flex items-center justify-center transition-all duration-150 ${getRailColor(
+                      w.repoId
+                    )} ${
+                      isActive
+                        ? "ring-2 ring-accent ring-offset-2 ring-offset-bg scale-105"
+                        : "opacity-75 hover:opacity-100 hover:scale-105"
+                    }`}
+                  >
+                    {getRepoMonogram(w.name)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteWorkspace(w.repoId);
+                    }}
+                    title={`Remove ${w.owner}/${w.name}`}
+                    aria-label={`Remove ${w.owner}/${w.name}`}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm hover:bg-red-700"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              );
+            })}
+
+            {recentWorkspaces.length < MAX_WORKSPACES && (
+              <button
+                type="button"
+                onClick={openNewRepoScreen}
+                title="Add new repository"
+                aria-label="Add new repository"
+                className="w-9 h-9 rounded-xl border border-dashed border-border text-text-muted hover:text-accent hover:border-accent flex items-center justify-center transition-colors shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </aside>
 
         {/* Left Sidebar (Explorer / Search) */}
-        <section
-          style={{ width: leftWidth }}
-          className={`${
-            mobilePane === "explorer" ? "flex w-full lg:w-auto" : "hidden lg:flex"
-          } flex-col border-r border-border bg-surface shrink-0 min-h-0`}
-        >
+        {showLeftSidebar && (
+          <>
+            <section
+              style={{ width: leftWidth }}
+              className={`${
+                mobilePane === "explorer" ? "flex w-full lg:w-auto" : "hidden lg:flex"
+              } flex-col border-r border-border bg-surface shrink-0 min-h-0`}
+            >
           {sidebarTab === "explorer" ? (
             <FileTree
               tree={tree}
@@ -667,18 +872,20 @@ export default function App() {
               </div>
             </div>
           )}
-        </section>
+            </section>
 
-        {/* Left Resize Handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onMouseDown={() => {
-            draggingRef.current = "left";
-            document.body.style.cursor = "col-resize";
-          }}
-          className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
-        />
+            {/* Left Resize Handle */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={() => {
+                draggingRef.current = "left";
+                document.body.style.cursor = "col-resize";
+              }}
+              className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
+            />
+          </>
+        )}
 
         {/* Center Code Viewer */}
         <main
@@ -695,34 +902,38 @@ export default function App() {
           />
         </main>
 
-        {/* Right Resize Handle */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onMouseDown={() => {
-            draggingRef.current = "right";
-            document.body.style.cursor = "col-resize";
-          }}
-          className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
-        />
+        {/* Right Resize Handle + Agent Chat Panel */}
+        {showChatPanel && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={() => {
+                draggingRef.current = "right";
+                document.body.style.cursor = "col-resize";
+              }}
+              className="hidden lg:block w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
+            />
 
-        {/* Right Agent Chat Panel */}
-        <aside
-          style={{ width: rightWidth }}
-          className={`${
-            mobilePane === "chat" ? "flex w-full lg:w-auto" : "hidden lg:flex"
-          } flex-col border-l border-border shrink-0 min-h-0`}
-        >
-          <ChatPanel
-            messages={messages}
-            languageMode={languageMode}
-            activeStage={activeStage}
-            isStreaming={isStreaming}
-            onToggleLanguage={setLanguageMode}
-            onSendMessage={handleSendMessage}
-            onClickCitation={(cite) => openFile(cite.file, cite)}
-          />
-        </aside>
+            <aside
+              style={{ width: rightWidth }}
+              className={`${
+                mobilePane === "chat" ? "flex w-full lg:w-auto" : "hidden lg:flex"
+              } flex-col border-l border-border shrink-0 min-h-0`}
+            >
+              <ChatPanel
+                messages={messages}
+                languageMode={languageMode}
+                activeStage={activeStage}
+                isStreaming={isStreaming}
+                languages={archData?.languages}
+                onToggleLanguage={setLanguageMode}
+                onSendMessage={handleSendMessage}
+                onClickCitation={(cite) => openFile(cite.file, cite)}
+              />
+            </aside>
+          </>
+        )}
       </div>
 
       <ArchitectureModal
@@ -730,6 +941,18 @@ export default function App() {
         data={archData}
         onClose={() => setArchOpen(false)}
         onSelectFile={(path) => openFile(path)}
+      />
+
+      <ShareSnapshotModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        snapshotInput={{
+          repoStatus,
+          tree,
+          archData,
+          openTabs,
+          messages,
+        }}
       />
     </div>
   );

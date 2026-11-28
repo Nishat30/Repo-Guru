@@ -4,39 +4,49 @@
 
 :root,
 [data-theme="light"] {
-  --bg: #faf9f5;
-  --surface: #ffffff;
-  --surface-alt: #f3f1ea;
-  --border: #e5e2dc;
-  --text: #1a1915;
-  --text-muted: #6b6860;
-  --accent: #d97757;
-  --accent-hover: #c56546;
-  --accent-soft: rgba(217, 119, 87, 0.12);
-  --highlight-bg: rgba(250, 204, 21, 0.26);
-  --highlight-border: #eab308;
-  --code-bg: #fcfbf8;
-  --shadow-soft: 0 4px 20px rgba(26, 25, 21, 0.05);
+  --bg: #f3ebdd;
+  --surface: #fffdf8;
+  --surface-alt: #eae0cf;
+  --border: #dccdb8;
+  --text: #171923;
+  --text-muted: #77695d;
+  --accent: #4a1728;
+  --accent-hover: #38101e;
+  --accent-soft: rgba(74, 23, 40, 0.08);
+  --gold: #c49a52;
+  --forest: #182b24;
+  --bronze: #8b7355;
+  --highlight-bg: rgba(196, 154, 82, 0.22);
+  --highlight-border: #c49a52;
+  --code-bg: #faf5ea;
+  --shadow-soft: 0 12px 36px rgba(23, 25, 35, 0.07);
 }
 
 [data-theme="dark"] {
-  --bg: #181715;
-  --surface: #21201d;
-  --surface-alt: #292723;
-  --border: #35322c;
-  --text: #eceae4;
-  --text-muted: #a19d94;
-  --accent: #e08365;
-  --accent-hover: #eb9377;
-  --accent-soft: rgba(224, 131, 101, 0.16);
-  --highlight-bg: rgba(250, 204, 21, 0.18);
-  --highlight-border: #facc15;
-  --code-bg: #1c1b18;
-  --shadow-soft: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --bg: #171923;
+  --surface: #1e1c24;
+  --surface-alt: #28242d;
+  --border: #3a323d;
+  --text: #f3ebdd;
+  --text-muted: #b6a998;
+  --accent: #c49a52;
+  --accent-hover: #d4ac65;
+  --accent-soft: rgba(196, 154, 82, 0.14);
+  --gold: #c49a52;
+  --forest: #182b24;
+  --bronze: #8b7355;
+  --highlight-bg: rgba(196, 154, 82, 0.2);
+  --highlight-border: #c49a52;
+  --code-bg: #151720;
+  --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.42);
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 html,
@@ -46,8 +56,51 @@ body,
   margin: 0;
   background-color: var(--bg);
   color: var(--text);
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: "DM Sans", system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle aged-paper grain & atmospheric candlelight */
+.library-atmosphere {
+  background-image:
+    radial-gradient(ellipse 75% 50% at 50% 0%, rgba(196, 154, 82, 0.16), transparent 70%),
+    radial-gradient(ellipse 55% 40% at 50% 22%, rgba(74, 23, 40, 0.06), transparent 72%);
+}
+
+[data-theme="dark"] .library-atmosphere {
+  background-image:
+    radial-gradient(ellipse 75% 50% at 50% 0%, rgba(196, 154, 82, 0.12), transparent 70%),
+    radial-gradient(ellipse 60% 45% at 50% 24%, rgba(24, 43, 36, 0.35), transparent 75%);
+}
+
+.paper-grain {
+  background-image: radial-gradient(rgba(139, 115, 85, 0.07) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+@keyframes dustFloat {
+  0%,
+  100% {
+    transform: translateY(0px) translateX(0px);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translateY(-14px) translateX(6px);
+    opacity: 0.65;
+  }
+}
+
+.dust-particle {
+  animation: dustFloat 7s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .dust-particle {
+    animation: none;
+  }
 }
 
 /* Custom calm scrollbar */

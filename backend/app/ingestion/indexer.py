@@ -16,6 +16,7 @@ from app.core.llm import get_embeddings_model
 from app.ingestion.ast_chunker import CodeChunk
 
 TOKEN_SPLIT_RE = re.compile(r"[A-Za-z0-9_]+")
+_BM25_CACHE: dict[str, tuple[float, list[dict[str, Any]], BM25Okapi]] = {}
 
 
 def _tokenize(text: str) -> list[str]:
@@ -36,7 +37,10 @@ def get_qdrant_client() -> QdrantClient:
     """Return a singleton QdrantClient (remote URL or local persistent path)."""
     settings = get_settings()
     if settings.qdrant_url:
-        client = QdrantClient(url=settings.qdrant_url)
+        client = QdrantClient(
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key or None,
+        )
     else:
         settings.ensure_dirs()
         client = QdrantClient(path=str(settings.qdrant_dir))
@@ -147,14 +151,22 @@ def hybrid_search(repo_id: str, query: str, top_k: int = 8) -> list[dict[str, An
             chunk_by_key[key] = payload
             fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (rrf_k + rank)
 
-    # 2. BM25 keyword search
+    # 2. BM25 keyword search (cached by file mtime)
     bm25_path = settings.bm25_dir / f"{repo_id}.json"
     if bm25_path.exists():
-        bm25_data = json.loads(bm25_path.read_text(encoding="utf-8"))
-        records = bm25_data.get("records", [])
-        tokenized = bm25_data.get("tokenized", [])
-        if records and tokenized:
-            bm25 = BM25Okapi(tokenized)
+        mtime = bm25_path.stat().st_mtime
+        cached = _BM25_CACHE.get(repo_id)
+        if cached and cached[0] == mtime:
+            records, bm25 = cached[1], cached[2]
+        else:
+            bm25_data = json.loads(bm25_path.read_text(encoding="utf-8"))
+            records = bm25_data.get("records", [])
+            tokenized = bm25_data.get("tokenized", [])
+            bm25 = BM25Okapi(tokenized) if (records and tokenized) else None
+            if bm25 is not None:
+                _BM25_CACHE[repo_id] = (mtime, records, bm25)
+
+        if records and bm25 is not None:
             query_tokens = _tokenize(query)
             scores = bm25.get_scores(query_tokens)
             ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: top_k * 2]

@@ -5,8 +5,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        serif: ['"Newsreader"', "Georgia", "serif"],
-        sans: ['"Inter"', "system-ui", "-apple-system", "sans-serif"],
+        serif: ['"Cormorant Garamond"', "Georgia", "serif"],
+        sans: ['"DM Sans"', "system-ui", "-apple-system", "sans-serif"],
         mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
       },
       colors: {
@@ -19,6 +19,9 @@ export default {
         accent: "var(--accent)",
         "accent-hover": "var(--accent-hover)",
         "accent-soft": "var(--accent-soft)",
+        gold: "var(--gold)",
+        forest: "var(--forest)",
+        bronze: "var(--bronze)",
       },
     },
   },

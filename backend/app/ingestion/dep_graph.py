@@ -216,9 +216,25 @@ def get_architecture_overview(repo_id: str, limit: int = 40) -> dict[str, Any]:
         {"file": n, "imported_by": in_deg.get(n, 0), "imports": out_deg.get(n, 0)}
         for n in ranked[:10]
     ]
+
+    lang_weights: dict[str, int] = {}
+    for n in graph.nodes():
+        lang = str(graph.nodes[n].get("language", "text") or "text")
+        weight = int(graph.nodes[n].get("line_count", 0) or 1)
+        lang_weights[lang] = lang_weights.get(lang, 0) + weight
+    total_weight = sum(lang_weights.values()) or 1
+    languages = [
+        {
+            "language": lang,
+            "percent": round((w / total_weight) * 100, 1),
+        }
+        for lang, w in sorted(lang_weights.items(), key=lambda kv: kv[1], reverse=True)[:4]
+    ]
+
     return {
         "nodes": nodes,
         "edges": edges,
         "hub_files": hub_files,
+        "languages": languages,
         "stats": {"files": graph.number_of_nodes(), "edges": graph.number_of_edges()},
     }

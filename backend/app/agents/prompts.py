@@ -29,6 +29,7 @@ CRITICAL CITATION RULE:
 - Every time you reference a file, function, class, or line of code, you MUST cite it exclusively in this exact format:
   [[citation:relative/path/file.ext:start-end]]
   Example: [[citation:backend/app/main.py:42-68]]
+- Never put tool names (like `read_file_lines` or `get_repo_tree`) or `repo_id` inside `[[citation:...]]`.
 - Never invent file paths or line numbers. Only cite files and line ranges present in the verified evidence.
 - Do not use markdown links or backticks around the `[[citation:...]]` tag itself.
 

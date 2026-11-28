@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     data_dir: str = "./data"
     qdrant_url: str = ""
+    qdrant_api_key: str = ""
     database_url: str = "sqlite+aiosqlite:///./data/repoguru.db"
 
     clone_timeout_seconds: int = 90
